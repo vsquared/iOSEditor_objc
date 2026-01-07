@@ -1,1 +1,482 @@
-////  main.m//  iOSEditor//// ***** SandBox must be turned OFF for this to work! ***** //#import <Cocoa/Cocoa.h>NSTextView *logView;void NSLog( NSString *formatString, ... ) {    va_list ap;    va_start( ap, formatString );    NSString *format = [[NSString alloc] initWithFormat:@"%@\n", formatString];    NSString *string = [[NSString alloc] initWithFormat:format arguments:ap];    NSMutableAttributedString *attString = [[NSMutableAttributedString alloc] initWithString:string];    [logView setSelectedRange:NSMakeRange( [[logView string] length], 0 )];    [logView insertText:attString replacementRange:NSMakeRange([[logView string] length],0)];    va_end( ap );}@interface AppDelegate : NSObject <NSApplicationDelegate> {    NSWindow *window;    NSTextView *txtView;    NSPopUpButton *simPup;    NSMutableArray *sims;    NSURL *fileURL;    NSString *uuid;}@end@implementation AppDelegate-(void) openAction {    NSOpenPanel *op = [NSOpenPanel openPanel];    [op beginSheetModalForWindow: window completionHandler: ^(NSInteger returnCode) {        if (returnCode == NSModalResponseOK) {            self->fileURL = [op URL];            NSString *wndTitle = [NSString stringWithFormat:@"%@",[self->fileURL path]];            [self->window setTitle:wndTitle];            NSError *error;            NSString *fileStr = [[NSString alloc] initWithContentsOfURL:self->fileURL encoding:NSUTF8StringEncoding error:&error];            if (!fileStr) {                NSLog(@"Unable to open file %@", error);            } else {                [self->txtView setString:fileStr];            }        }    }];}-(void) saveAction {    NSFileManager *fileManager = [NSFileManager defaultManager];        if ([fileManager fileExistsAtPath:[fileURL path]]) {        NSString *viewStr = [[txtView textStorage] string];        NSError *err;        BOOL fileSaved = [viewStr writeToURL:fileURL atomically:YES encoding:NSUTF8StringEncoding error:&err];        if (!fileSaved) {            NSLog(@"Unable to save file due to error: %@", err);        }    } else {        NSLog (@"Unable to find file at fileURL.");        [self saveAsAction];    }}-(void) saveAsAction {    NSSavePanel *sp = [NSSavePanel savePanel];    [sp beginSheetModalForWindow: window completionHandler: ^(NSInteger returnCode) {        if (returnCode == NSModalResponseOK) {            self->fileURL = [sp URL];            NSString *wndTitle = [NSString stringWithFormat:@"%@",[self->fileURL path]];            [self->window setTitle:wndTitle];            NSString *viewStr = [[self->txtView textStorage] string];            NSError *err;            BOOL fileSaved = [viewStr writeToURL:self->fileURL atomically:YES encoding:NSUTF8StringEncoding error:&err];            if (!fileSaved) { NSLog(@"Unable to save file due to error: %@", err);}        }    }];}- (void)clearAllAction {    [txtView setString:@""];    [logView setString:@""];}- (void)clearLogAction {    [logView setString:@""];}- (void) fileMenuAction:(id)sender {    NSInteger selectedItem = [(id)sender indexOfSelectedItem];    switch (selectedItem) {        case 1:            [self openAction];            break;        case 2:            [self saveAction];            break;        case 3:            [self saveAsAction];            break;        case 5:            [self clearAllAction];            break;        case 6:            [self clearLogAction];            break;        default:            break;    }}- (void) simMenuAction: (id)sender{    NSString *simSelectStr = [sender title ];    NSLog(@"selection:%@", simSelectStr);    NSRange begin = [simSelectStr rangeOfString:@"(" options:NSBackwardsSearch range:NSMakeRange(0,[simSelectStr length])];    NSRange end = [simSelectStr rangeOfString:@")" options:NSBackwardsSearch range:NSMakeRange(0,[simSelectStr length])];    NSUInteger strLength = end.location - begin.location;    uuid = [simSelectStr substringWithRange:NSMakeRange(begin.location + 1,strLength - 1)];    NSLog(@"uuid:%@", uuid);}- (void) loadSims {    NSTask *task = [[NSTask alloc] init];    [task setLaunchPath: @"/bin/sh"];    [task setArguments: @[@"-c", @"xcrun simctl list devices"]];    NSPipe *pipe = [NSPipe pipe];    [task setStandardOutput: pipe];    [task launch];    [task waitUntilExit];    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];    NSArray *strArray = [outStr componentsSeparatedByString:@"\n"];    for(NSUInteger i = 0; i < [strArray count]; i++){        NSString *str = strArray[i];        NSString *trimStr = [str stringByReplacingOccurrencesOfString:@"(Shutdown)" withString:@""];        [sims addObject:trimStr ];        [simPup addItemWithTitle:trimStr];    }}- (void)createExecutableInBundle:(NSURL *)bndlURL {    NSString *appName;    NSURL *execURL;    NSLog(@"fileURLPath:%@",[fileURL path]);    appName = [bndlURL URLByDeletingPathExtension].lastPathComponent;    execURL = [bndlURL URLByAppendingPathComponent:appName];    NSLog(@"execURLPath:%@",[execURL path]);    NSTask *task = [[NSTask alloc] init];    [task setLaunchPath: @"/usr/bin/swiftc"];    NSMutableArray *args = [NSMutableArray array];    [args addObject:[fileURL path]];    [args addObject:@"-o"];    [args addObject:[execURL path]];    [args addObject:@"-sdk"];    [args addObject:@"/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator18.2.sdk"];    [args addObject:@"-target"];    [args addObject:@"arm64-apple-ios14.4-simulator"];    [task setArguments: args];    NSPipe *pipe = [NSPipe pipe];    [task setStandardOutput: pipe];    [task setStandardError:pipe];    [task launch];    [task waitUntilExit];    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];    NSLog(@"%@",outStr);}- (void)createInfoPlistInBundle:(NSURL *)bndlURL{    NSString *appName;    NSURL *bndlPlistURL;        appName = [bndlURL URLByDeletingPathExtension].lastPathComponent;    NSLog(@"appName = %@",appName);    NSString *bndlIdentifier = [@"com.yourName." stringByAppendingString:appName];    NSMutableDictionary *plist = [[NSMutableDictionary alloc] initWithCapacity:0];    plist[@"CFBundleDevelopmentRegion"] = @"en";    plist[@"CFBundleExecutable"] = appName;    plist[@"CFBundleDisplayName"] = appName;    plist[@"CFBundleIdentifier"] = bndlIdentifier;    plist[@"CFBundleInfoDictionaryVersion"] = @"6.0";    plist[@"CFBundleName"] = appName;    plist[@"CFBundleShortVersionString"] = @"1.0.2";    plist[@"CFBundleVersion"] = @"1.0.2";    plist[@"CFBundleIconFiles"] = @"";    plist[@"NSPrincipalClass"] = @"UIApplication";    plist[@"LSRequiresIPhoneOS"] = @"YES";    plist[@"UIRequiredDeviceCapabilities"] = @[@"arm64",@"armv7"];    plist[@"UIApplicationSupportsIndirectInputEvents"] = @"YES";    plist[@"UISupportedIntefaceOrientations"] = @[@"UIInterfaceOrientationPortrait",@"UIInterfaceOrientationLandscapeLeft",@"UIInterfaceOrientationLandscapeRight"];    bndlPlistURL = [bndlURL URLByAppendingPathComponent:@"Info.plist"];    Boolean written = [plist writeToURL:bndlPlistURL atomically:YES ];    if(written){        NSLog(@"plist was created in bundle.");    }}- (void)buildBundle {    NSError *err;    if(fileURL != nil){        NSFileManager *fm = [NSFileManager defaultManager];        NSURL *tmpURL = [fileURL URLByDeletingPathExtension];        NSURL *bundleURL = [tmpURL URLByAppendingPathExtension:@"app"];        NSLog(@"bundleURL: %@",bundleURL);        Boolean created =  [fm createDirectoryAtURL:bundleURL withIntermediateDirectories:YES attributes:nil error:&err];        if(!created){            NSAlert *alert = [[NSAlert alloc] init];            [alert setMessageText:@"Unable to create app bundle directory."];            [alert runModal];        } else {            [self createInfoPlistInBundle:bundleURL];            [self createExecutableInBundle:bundleURL];        }    }}- (void)bootAction{    NSTask *task = [[NSTask alloc] init];    [task setLaunchPath: @"/bin/sh"];    NSString *bootStr = [NSString stringWithFormat:@"xcrun simctl boot %@",uuid];    NSLog (@"bootStr: %@",bootStr);    NSArray *args = @[@"-c",bootStr];    NSLog (@"args: %@",args);    [task setArguments:args ];    NSPipe *pipe = [NSPipe pipe];    [task setStandardOutput: pipe];    [task launch];    [task waitUntilExit];    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];    NSLog(@"bootAction output: %@",outStr);    if (![task isRunning]) {        int status = [task terminationStatus];        NSLog (@"status:%d",status);        if (status == 0) {            NSLog(@"Boot Action succeeded.");        } else {            NSLog(@"Boot Action failed.");        }    }    NSLog(@" =================== end boot action =================== ");}- (void)installIOSApp{    NSURL *tmpURL = [fileURL URLByDeletingPathExtension];    NSString *filePath = [tmpURL path];    NSString *appPath = [filePath stringByAppendingString:@".app"];    NSLog(@"appPath = %@",appPath);    NSLog(@"uuid: %@",uuid);    NSTask *task = [[NSTask alloc] init];    [task setLaunchPath: @"/bin/sh"];    NSString *installStr = [NSString stringWithFormat:@"xcrun simctl install %@ %@", uuid, appPath];    NSLog (@"installStr: %@",installStr);    NSArray *args = @[@"-c",installStr];    NSLog (@"args: %@",args);    [task setArguments: args];    NSPipe *pipe = [NSPipe pipe];    [task setStandardOutput: pipe];    [task setStandardError: pipe];    [task launch];    [task waitUntilExit];       NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];    NSLog(@"InstallIOSApp output: %@",outStr);       if (![task isRunning]) {        int status = [task terminationStatus];        NSLog (@"status:%d",status);        if (status == 0) {            NSLog(@"InstallIOSApp succeeded.");        } else {            NSLog(@"InstallIOSApp failed.");        }    }    NSLog(@" =================== end installIOSApp =================== ");}- (void)launchIOSApp{    NSString *appName = [fileURL URLByDeletingPathExtension].lastPathComponent;    NSString *bundleIdentifier = [@"com.yourName." stringByAppendingString:appName];    NSLog(@"launchIOSApp bundleIdentifier: %@",bundleIdentifier);    NSTask *task = [[NSTask alloc] init];    [task setLaunchPath: @"/bin/sh"];    NSString *launchStr = [NSString stringWithFormat:@"xcrun simctl launch %@ %@", uuid, bundleIdentifier];    NSLog (@"launchStr: %@",launchStr);    NSArray *args = @[@"-c",launchStr];    NSLog (@"args: %@",args);    [task setArguments: args];        NSPipe *pipe = [NSPipe pipe];    [task setStandardOutput: pipe];    [task setStandardError: pipe];    [task launch];    [task waitUntilExit];        NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];    NSLog(@"LaunchIOSApp output: %@",outStr);    if (![task isRunning]) {        int status = [task terminationStatus];        NSLog (@"status:%d",status);        if (status == 0) {            NSLog(@"LaunchIOSApp succeeded.");        } else {            NSLog(@"LaunchIOSApp failed.");        }    }    NSLog(@" ================== end launchIOSApp ======================= ");}- (void)launchSimulatorApp {    NSTask *task = [[NSTask alloc] init];    NSError *error;    [task setLaunchPath: @"/bin/sh"];    [task setArguments: @[@"-c", @"open '/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app'"]];    NSPipe *pipe = [NSPipe pipe];    [task setStandardOutput: pipe];    [task setStandardError: pipe];    [task launchAndReturnError:&error];    [task waitUntilExit];    NSLog (@"error:%@",error);    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];    NSLog(@"LaunchSimulatorApp output: %@",outStr);    if (![task isRunning]) {        int status = [task terminationStatus];        NSLog (@"status:%d",status);        if (status == 0) {            NSLog(@"LaunchSimulatorApp succeeded.");        } else {            NSLog(@"LaunchSimulatorApp failed.");        }    }    NSLog(@" ================= end launchSimulatorApp ============== ");}- (void) badExtensionAlert {    NSAlert *alert = [[NSAlert alloc] init];    [alert setMessageText:@".swift file extension required in order to compile.\n Please save file with appropriate extension."];    [alert runModal];}- (void) myRunAction: (id)sender {    if(![fileURL.pathExtension isEqualToString:@"swift"]){        [self badExtensionAlert];    } else {        [self buildBundle];        [self bootAction];        [self installIOSApp];        [self launchIOSApp];        [self launchSimulatorApp];    }}- (void) buildMenu {    NSMenu *menubar = [NSMenu new];    NSMenuItem *appMenuItem = [NSMenuItem new];    [menubar addItem:appMenuItem];    [NSApp setMainMenu:menubar];    NSMenu *appMenu = [NSMenu new];    [appMenu addItemWithTitle: @"Quit" action:@selector(terminate:) keyEquivalent:@"q"];    [menubar setSubmenu:appMenu forItem:appMenuItem];}- (void) buildWindow {    #define _wndW  900#define _wndH  800        window = [[NSWindow alloc] initWithContentRect: NSMakeRect( 0, 0, _wndW, _wndH ) styleMask: NSWindowStyleMaskTitled | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable backing: NSBackingStoreBuffered defer: NO];        [window center];    [window setTitle: @"iOS Editor"];    [window makeKeyAndOrderFront: nil];        sims = [NSMutableArray array];        // **** Split View **** //    NSSplitView *splitView = [[NSSplitView alloc] initWithFrame:NSMakeRect( 20, 10, _wndW - 40, _wndH - 80 )];    [[window contentView] addSubview:splitView];    NSScrollView *txtScrlView = [[NSScrollView alloc]initWithFrame:NSMakeRect( 0, 0, 0, 3*_wndH/4 )];    [txtScrlView setHasVerticalScroller: YES];    [txtScrlView setHasHorizontalScroller: YES];    txtView = [[NSTextView alloc] initWithFrame:NSMakeRect( 0, 0, 0, 3*_wndH/4 )];    [txtView setFont:[NSFont fontWithName: @"Menlo" size:13]];    [txtView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];    [txtScrlView setDocumentView: txtView];    [txtScrlView setAutoresizesSubviews:YES];    NSScrollView *logScrlView = [[NSScrollView alloc]initWithFrame:NSMakeRect( 0, 0, 0, _wndH/4 )];    logView = [[NSTextView alloc] initWithFrame:NSMakeRect( 0, 0, 0, _wndH/4 )];    [logScrlView setHasVerticalScroller: YES];    [logScrlView setHasHorizontalScroller: YES];    [logView setFont:[NSFont fontWithName: @"Menlo" size:12]];    [logView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];    [logScrlView setDocumentView: logView];    [logScrlView setAutoresizesSubviews:YES];    [splitView addSubview:txtScrlView];    [splitView addSubview:logScrlView];    [splitView setDividerStyle:NSSplitViewDividerStylePaneSplitter];    [splitView setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin |  NSViewWidthSizable | NSViewHeightSizable];        // ****** Pull-Down File Menu Button ******* //    // First array element (0) becomes the title    // Or use 'Empty' string for first array element and separately '-setTitle:'    NSArray *menuItems = [NSArray arrayWithObjects: @"", @"Open", @"Save",@"SaveAs",@"-----------", @"Clear All",@"Clear Log",nil];    NSPopUpButton *fileMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect( 20, _wndH - 50, 100, 24 )];    [fileMenu setPullsDown:YES];    [fileMenu addItemsWithTitles:menuItems];    [fileMenu setTitle:@"File"];    [fileMenu setAction:@selector(fileMenuAction:)];    [fileMenu setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin];    [[window contentView] addSubview: fileMenu];        // **** Sim PopUp **** //    simPup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect( 140, _wndH - 50, 530, 24 )];    [simPup setAction:@selector(simMenuAction:)];    [simPup setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin];    [[window contentView] addSubview:simPup];        // **** Run button image (triangle) ***** //    NSRect imgRect = NSMakeRect(0,0,32,32);    NSImage *img = [[NSImage alloc] initWithSize:imgRect.size];    [img lockFocus];    // ==== outer circle (frame) ==== //    NSRect frameR = NSInsetRect(imgRect, 3, 3);    NSBezierPath *frame = [NSBezierPath bezierPathWithOvalInRect:frameR];    [[NSColor lightGrayColor] set];    [frame setLineWidth:3.0];    [frame stroke];    // ==== inner circle ===== //    NSRect circleR = NSInsetRect(frameR, 1, 1);    NSBezierPath *circle = [NSBezierPath bezierPathWithOvalInRect:circleR];    [[NSColor blueColor] set];    [circle fill];    // ==== triangle ==== //    [[NSColor whiteColor]set];    NSBezierPath *triangle = [NSBezierPath bezierPath];    [triangle moveToPoint:NSMakePoint(11, 9)];  // bottom left    [triangle lineToPoint:NSMakePoint(11, 23)]; // top left    [triangle lineToPoint:NSMakePoint(24, 16)]; // center    [triangle closePath];    [triangle fill];    [img unlockFocus];        // **** Run Button **** //    NSButton *runBtn =[[NSButton alloc]initWithFrame:NSMakeRect( 680, _wndH - 50, 32, 32 )];    [runBtn setImage:img];    [runBtn setBezelStyle:NSBezelStyleCircular];    [runBtn setAction:@selector(myRunAction:)];    [runBtn setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin];    [runBtn setToolTip:@"Run button."];    [[window contentView] addSubview:runBtn];        // ***** Quit btn ***** //    NSButton *quitBtn = [[NSButton alloc]initWithFrame:NSMakeRect( _wndW - 50, _wndH - 40, 40, 40 )];    [quitBtn setBezelStyle:NSBezelStyleCircular ];    [quitBtn setTitle: @"Q" ];    [quitBtn setAutoresizingMask: NSViewMinXMargin | NSViewMinYMargin];    [quitBtn setAction:@selector(terminate:)];    [quitBtn setToolTip:@"Quit button"];    [[window contentView] addSubview: quitBtn];}- (void) applicationWillFinishLaunching: (NSNotification *)notification {    [self buildMenu];    [self buildWindow];    [self loadSims];}- (void) applicationDidFinishLaunching: (NSNotification *)notification {}@endint main (void) {    NSApplication *application = [NSApplication sharedApplication];    AppDelegate *appDelegate = [[AppDelegate alloc] init];    [application setDelegate:appDelegate];    [application run];    return 0;}
+//
+//  main.m
+//  iOSEditor
+//
+
+// ***** SandBox must be turned OFF for this to work! ***** //
+
+#import <Cocoa/Cocoa.h>
+
+NSTextView *logView;
+
+void NSLog( NSString *formatString, ... ) {
+    va_list ap;
+    va_start( ap, formatString );
+    NSString *format = [[NSString alloc] initWithFormat:@"%@\n", formatString];
+    NSString *string = [[NSString alloc] initWithFormat:format arguments:ap];
+    NSMutableAttributedString *attString = [[NSMutableAttributedString alloc] initWithString:string];
+    [logView setSelectedRange:NSMakeRange( [[logView string] length], 0 )];
+    [logView insertText:attString replacementRange:NSMakeRange([[logView string] length],0)];
+    va_end( ap );
+}
+
+@interface AppDelegate : NSObject <NSApplicationDelegate> {
+    NSWindow *window;
+    NSTextView *txtView;
+    NSPopUpButton *simPup;
+    NSMutableArray *sims;
+    NSURL *fileURL;
+    NSString *uuid;
+}
+@end
+
+@implementation AppDelegate
+
+-(void) openAction {
+    NSOpenPanel *op = [NSOpenPanel openPanel];
+    [op beginSheetModalForWindow: window completionHandler: ^(NSInteger returnCode) {
+        if (returnCode == NSModalResponseOK) {
+            self->fileURL = [op URL];
+            NSString *wndTitle = [NSString stringWithFormat:@"%@",[self->fileURL path]];
+            [self->window setTitle:wndTitle];
+            NSError *error;
+            NSString *fileStr = [[NSString alloc] initWithContentsOfURL:self->fileURL encoding:NSUTF8StringEncoding error:&error];
+            if (!fileStr) {
+                NSLog(@"Unable to open file %@", error);
+            } else {
+                [self->txtView setString:fileStr];
+            }
+        }
+    }];
+}
+
+-(void) saveAction {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    
+    if ([fileManager fileExistsAtPath:[fileURL path]]) {
+        NSString *viewStr = [[txtView textStorage] string];
+        NSError *err;
+        BOOL fileSaved = [viewStr writeToURL:fileURL atomically:YES encoding:NSUTF8StringEncoding error:&err];
+        if (!fileSaved) {
+            NSLog(@"Unable to save file due to error: %@", err);
+        }
+    } else {
+        NSLog (@"Unable to find file at fileURL.");
+        [self saveAsAction];
+    }
+}
+
+-(void) saveAsAction {
+    NSSavePanel *sp = [NSSavePanel savePanel];
+    [sp beginSheetModalForWindow: window completionHandler: ^(NSInteger returnCode) {
+        if (returnCode == NSModalResponseOK) {
+            self->fileURL = [sp URL];
+            NSString *wndTitle = [NSString stringWithFormat:@"%@",[self->fileURL path]];
+            [self->window setTitle:wndTitle];
+            NSString *viewStr = [[self->txtView textStorage] string];
+            NSError *err;
+            BOOL fileSaved = [viewStr writeToURL:self->fileURL atomically:YES encoding:NSUTF8StringEncoding error:&err];
+            if (!fileSaved) { NSLog(@"Unable to save file due to error: %@", err);}
+        }
+    }];
+}
+
+- (void)clearAllAction {
+    [txtView setString:@""];
+    [logView setString:@""];
+}
+
+- (void)clearLogAction {
+    [logView setString:@""];
+}
+
+- (void) fileMenuAction:(id)sender {
+    NSInteger selectedItem = [(id)sender indexOfSelectedItem];
+    switch (selectedItem) {
+        case 1:
+            [self openAction];
+            break;
+        case 2:
+            [self saveAction];
+            break;
+        case 3:
+            [self saveAsAction];
+            break;
+        case 5:
+            [self clearAllAction];
+            break;
+        case 6:
+            [self clearLogAction];
+            break;
+        default:
+            break;
+    }
+}
+
+- (void) simMenuAction: (id)sender{
+    NSString *simSelectStr = [sender title ];
+    NSLog(@"selection:%@", simSelectStr);
+    NSRange begin = [simSelectStr rangeOfString:@"(" options:NSBackwardsSearch range:NSMakeRange(0,[simSelectStr length])];
+    NSRange end = [simSelectStr rangeOfString:@")" options:NSBackwardsSearch range:NSMakeRange(0,[simSelectStr length])];
+    NSUInteger strLength = end.location - begin.location;
+    uuid = [simSelectStr substringWithRange:NSMakeRange(begin.location + 1,strLength - 1)];
+    NSLog(@"uuid:%@", uuid);
+}
+
+- (void) loadSims {
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath: @"/bin/sh"];
+    [task setArguments: @[@"-c", @"xcrun simctl list devices"]];
+    NSPipe *pipe = [NSPipe pipe];
+    [task setStandardOutput: pipe];
+    [task launch];
+    [task waitUntilExit];
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];
+    NSArray *strArray = [outStr componentsSeparatedByString:@"\n"];
+    for(NSUInteger i = 0; i < [strArray count]; i++){
+        NSString *str = strArray[i];
+        NSString *trimStr = [str stringByReplacingOccurrencesOfString:@"(Shutdown)" withString:@""];
+        [sims addObject:trimStr ];
+        [simPup addItemWithTitle:trimStr];
+    }
+}
+
+- (void)createExecutableInBundle:(NSURL *)bndlURL {
+    NSString *appName;
+    NSURL *execURL;
+    NSLog(@"fileURLPath:%@",[fileURL path]);
+    appName = [bndlURL URLByDeletingPathExtension].lastPathComponent;
+    execURL = [bndlURL URLByAppendingPathComponent:appName];
+    NSLog(@"execURLPath:%@",[execURL path]);
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath: @"/usr/bin/swiftc"];
+    NSMutableArray *args = [NSMutableArray array];
+    [args addObject:[fileURL path]];
+    [args addObject:@"-o"];
+    [args addObject:[execURL path]];
+    [args addObject:@"-sdk"];
+    [args addObject:@"/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator18.2.sdk"];
+    [args addObject:@"-target"];
+    [args addObject:@"arm64-apple-ios14.4-simulator"];
+    [task setArguments: args];
+    NSPipe *pipe = [NSPipe pipe];
+    [task setStandardOutput: pipe];
+    [task setStandardError:pipe];
+    [task launch];
+    [task waitUntilExit];
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];
+    NSLog(@"%@",outStr);
+}
+
+- (void)createInfoPlistInBundle:(NSURL *)bndlURL{
+    NSString *appName;
+    NSURL *bndlPlistURL;
+    
+    appName = [bndlURL URLByDeletingPathExtension].lastPathComponent;
+    NSLog(@"appName = %@",appName);
+    NSString *bndlIdentifier = [@"com.yourName." stringByAppendingString:appName];
+    NSMutableDictionary *plist = [[NSMutableDictionary alloc] initWithCapacity:0];
+    plist[@"CFBundleDevelopmentRegion"] = @"en";
+    plist[@"CFBundleExecutable"] = appName;
+    plist[@"CFBundleDisplayName"] = appName;
+    plist[@"CFBundleIdentifier"] = bndlIdentifier;
+    plist[@"CFBundleInfoDictionaryVersion"] = @"6.0";
+    plist[@"CFBundleName"] = appName;
+    plist[@"CFBundleShortVersionString"] = @"1.0.2";
+    plist[@"CFBundleVersion"] = @"1.0.2";
+    plist[@"CFBundleIconFiles"] = @"";
+    plist[@"NSPrincipalClass"] = @"UIApplication";
+    plist[@"LSRequiresIPhoneOS"] = @"YES";
+    plist[@"UIRequiredDeviceCapabilities"] = @[@"arm64",@"armv7"];
+    plist[@"UIApplicationSupportsIndirectInputEvents"] = @"YES";
+    plist[@"UISupportedIntefaceOrientations"] = @[@"UIInterfaceOrientationPortrait",@"UIInterfaceOrientationLandscapeLeft",@"UIInterfaceOrientationLandscapeRight"];
+    bndlPlistURL = [bndlURL URLByAppendingPathComponent:@"Info.plist"];
+    Boolean written = [plist writeToURL:bndlPlistURL atomically:YES ];
+    if(written){
+        NSLog(@"plist was created in bundle.");
+    }
+}
+
+- (void)buildBundle {
+    NSError *err;
+    if(fileURL != nil){
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSURL *tmpURL = [fileURL URLByDeletingPathExtension];
+        NSURL *bundleURL = [tmpURL URLByAppendingPathExtension:@"app"];
+        NSLog(@"bundleURL: %@",bundleURL);
+        Boolean created =  [fm createDirectoryAtURL:bundleURL withIntermediateDirectories:YES attributes:nil error:&err];
+        if(!created){
+            NSAlert *alert = [[NSAlert alloc] init];
+            [alert setMessageText:@"Unable to create app bundle directory."];
+            [alert runModal];
+        } else {
+            [self createInfoPlistInBundle:bundleURL];
+            [self createExecutableInBundle:bundleURL];
+        }
+    }
+}
+
+- (void)bootAction{
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath: @"/bin/sh"];
+    NSString *bootStr = [NSString stringWithFormat:@"xcrun simctl boot %@",uuid];
+    NSLog (@"bootStr: %@",bootStr);
+    NSArray *args = @[@"-c",bootStr];
+    NSLog (@"args: %@",args);
+    [task setArguments:args ];
+    NSPipe *pipe = [NSPipe pipe];
+    [task setStandardOutput: pipe];
+    [task launch];
+    [task waitUntilExit];
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];
+    NSLog(@"bootAction output: %@",outStr);
+    if (![task isRunning]) {
+        int status = [task terminationStatus];
+        NSLog (@"status:%d",status);
+        if (status == 0) {
+            NSLog(@"Boot Action succeeded.");
+        } else {
+            NSLog(@"Boot Action failed.");
+        }
+    }
+    NSLog(@" =================== end boot action =================== ");
+}
+
+- (void)installIOSApp{
+    NSURL *tmpURL = [fileURL URLByDeletingPathExtension];
+    NSString *filePath = [tmpURL path];
+    NSString *appPath = [filePath stringByAppendingString:@".app"];
+    NSLog(@"appPath = %@",appPath);
+    NSLog(@"uuid: %@",uuid);
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath: @"/bin/sh"];
+    NSString *installStr = [NSString stringWithFormat:@"xcrun simctl install %@ %@", uuid, appPath];
+    NSLog (@"installStr: %@",installStr);
+    NSArray *args = @[@"-c",installStr];
+    NSLog (@"args: %@",args);
+    [task setArguments: args];
+    NSPipe *pipe = [NSPipe pipe];
+    [task setStandardOutput: pipe];
+    [task setStandardError: pipe];
+    [task launch];
+    [task waitUntilExit];   
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];
+    NSLog(@"InstallIOSApp output: %@",outStr);   
+    if (![task isRunning]) {
+        int status = [task terminationStatus];
+        NSLog (@"status:%d",status);
+        if (status == 0) {
+            NSLog(@"InstallIOSApp succeeded.");
+        } else {
+            NSLog(@"InstallIOSApp failed.");
+        }
+    }
+    NSLog(@" =================== end installIOSApp =================== ");
+}
+
+- (void)launchIOSApp{
+    NSString *appName = [fileURL URLByDeletingPathExtension].lastPathComponent;
+    NSString *bundleIdentifier = [@"com.yourName." stringByAppendingString:appName];
+    NSLog(@"launchIOSApp bundleIdentifier: %@",bundleIdentifier);
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath: @"/bin/sh"];
+    NSString *launchStr = [NSString stringWithFormat:@"xcrun simctl launch %@ %@", uuid, bundleIdentifier];
+    NSLog (@"launchStr: %@",launchStr);
+    NSArray *args = @[@"-c",launchStr];
+    NSLog (@"args: %@",args);
+    [task setArguments: args];    
+    NSPipe *pipe = [NSPipe pipe];
+    [task setStandardOutput: pipe];
+    [task setStandardError: pipe];
+    [task launch];
+    [task waitUntilExit];    
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];
+    NSLog(@"LaunchIOSApp output: %@",outStr);
+    if (![task isRunning]) {
+        int status = [task terminationStatus];
+        NSLog (@"status:%d",status);
+        if (status == 0) {
+            NSLog(@"LaunchIOSApp succeeded.");
+        } else {
+            NSLog(@"LaunchIOSApp failed.");
+        }
+    }
+    NSLog(@" ================== end launchIOSApp ======================= ");
+}
+
+- (void)launchSimulatorApp {
+    NSTask *task = [[NSTask alloc] init];
+    NSError *error;
+    [task setLaunchPath: @"/bin/sh"];
+    [task setArguments: @[@"-c", @"open '/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app'"]];
+    NSPipe *pipe = [NSPipe pipe];
+    [task setStandardOutput: pipe];
+    [task setStandardError: pipe];
+    [task launchAndReturnError:&error];
+    [task waitUntilExit];
+    NSLog (@"error:%@",error);
+    NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
+    NSString *outStr = [[NSString alloc] initWithData: data encoding: NSUTF8StringEncoding];
+    NSLog(@"LaunchSimulatorApp output: %@",outStr);
+    if (![task isRunning]) {
+        int status = [task terminationStatus];
+        NSLog (@"status:%d",status);
+        if (status == 0) {
+            NSLog(@"LaunchSimulatorApp succeeded.");
+        } else {
+            NSLog(@"LaunchSimulatorApp failed.");
+        }
+    }
+    NSLog(@" ================= end launchSimulatorApp ============== ");
+}
+
+- (void) badExtensionAlert {
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setMessageText:@".swift file extension required in order to compile.\n Please save file with appropriate extension."];
+    [alert runModal];
+}
+
+- (void) myRunAction: (id)sender {
+    if(![fileURL.pathExtension isEqualToString:@"swift"]){
+        [self badExtensionAlert];
+    } else {
+        [self buildBundle];
+        [self bootAction];
+        [self installIOSApp];
+        [self launchIOSApp];
+        [self launchSimulatorApp];
+    }
+}
+
+- (void) buildMenu {
+    NSMenu *menubar = [NSMenu new];
+    NSMenuItem *appMenuItem = [NSMenuItem new];
+    [menubar addItem:appMenuItem];
+    [NSApp setMainMenu:menubar];
+    NSMenu *appMenu = [NSMenu new];
+    [appMenu addItemWithTitle: @"Quit" action:@selector(terminate:) keyEquivalent:@"q"];
+    [menubar setSubmenu:appMenu forItem:appMenuItem];
+}
+
+- (void) buildWindow {
+    
+#define _wndW  900
+#define _wndH  800
+    
+    window = [[NSWindow alloc] initWithContentRect: NSMakeRect( 0, 0, _wndW, _wndH ) styleMask: NSWindowStyleMaskTitled | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable backing: NSBackingStoreBuffered defer: NO];
+    
+    [window center];
+    [window setTitle: @"iOS Editor"];
+    [window makeKeyAndOrderFront: nil];
+    
+    sims = [NSMutableArray array];
+    
+    // **** Split View **** //
+    NSSplitView *splitView = [[NSSplitView alloc] initWithFrame:NSMakeRect( 20, 10, _wndW - 40, _wndH - 80 )];
+    [[window contentView] addSubview:splitView];
+    NSScrollView *txtScrlView = [[NSScrollView alloc]initWithFrame:NSMakeRect( 0, 0, 0, 3*_wndH/4 )];
+    [txtScrlView setHasVerticalScroller: YES];
+    [txtScrlView setHasHorizontalScroller: YES];
+    txtView = [[NSTextView alloc] initWithFrame:NSMakeRect( 0, 0, 0, 3*_wndH/4 )];
+    [txtView setFont:[NSFont fontWithName: @"Menlo" size:13]];
+    [txtView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    [txtScrlView setDocumentView: txtView];
+    [txtScrlView setAutoresizesSubviews:YES];
+    NSScrollView *logScrlView = [[NSScrollView alloc]initWithFrame:NSMakeRect( 0, 0, 0, _wndH/4 )];
+    logView = [[NSTextView alloc] initWithFrame:NSMakeRect( 0, 0, 0, _wndH/4 )];
+    [logScrlView setHasVerticalScroller: YES];
+    [logScrlView setHasHorizontalScroller: YES];
+    [logView setFont:[NSFont fontWithName: @"Menlo" size:12]];
+    [logView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+    [logScrlView setDocumentView: logView];
+    [logScrlView setAutoresizesSubviews:YES];
+    [splitView addSubview:txtScrlView];
+    [splitView addSubview:logScrlView];
+    [splitView setDividerStyle:NSSplitViewDividerStylePaneSplitter];
+    [splitView setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin |  NSViewWidthSizable | NSViewHeightSizable];
+    
+    // ****** Pull-Down File Menu Button ******* //
+    // First array element (0) becomes the title
+    // Or use 'Empty' string for first array element and separately '-setTitle:'
+    NSArray *menuItems = [NSArray arrayWithObjects: @"", @"Open", @"Save",@"SaveAs",@"-----------", @"Clear All",@"Clear Log",nil];
+    NSPopUpButton *fileMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect( 20, _wndH - 50, 100, 24 )];
+    [fileMenu setPullsDown:YES];
+    [fileMenu addItemsWithTitles:menuItems];
+    [fileMenu setTitle:@"File"];
+    [fileMenu setAction:@selector(fileMenuAction:)];
+    [fileMenu setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin];
+    [[window contentView] addSubview: fileMenu];
+    
+    // **** Sim PopUp **** //
+    simPup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect( 140, _wndH - 50, 530, 24 )];
+    [simPup setAction:@selector(simMenuAction:)];
+    [simPup setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin];
+    [[window contentView] addSubview:simPup];
+    
+    // **** Run button image (triangle) ***** //
+    NSRect imgRect = NSMakeRect(0,0,32,32);
+    NSImage *img = [[NSImage alloc] initWithSize:imgRect.size];
+    [img lockFocus];
+    // ==== outer circle (frame) ==== //
+    NSRect frameR = NSInsetRect(imgRect, 3, 3);
+    NSBezierPath *frame = [NSBezierPath bezierPathWithOvalInRect:frameR];
+    [[NSColor lightGrayColor] set];
+    [frame setLineWidth:3.0];
+    [frame stroke];
+    // ==== inner circle ===== //
+    NSRect circleR = NSInsetRect(frameR, 1, 1);
+    NSBezierPath *circle = [NSBezierPath bezierPathWithOvalInRect:circleR];
+    [[NSColor blueColor] set];
+    [circle fill];
+    // ==== triangle ==== //
+    [[NSColor whiteColor]set];
+    NSBezierPath *triangle = [NSBezierPath bezierPath];
+    [triangle moveToPoint:NSMakePoint(11, 9)];  // bottom left
+    [triangle lineToPoint:NSMakePoint(11, 23)]; // top left
+    [triangle lineToPoint:NSMakePoint(24, 16)]; // center
+    [triangle closePath];
+    [triangle fill];
+    [img unlockFocus];
+    
+    // **** Run Button **** //
+    NSButton *runBtn =[[NSButton alloc]initWithFrame:NSMakeRect( 680, _wndH - 50, 32, 32 )];
+    [runBtn setImage:img];
+    [runBtn setBezelStyle:NSBezelStyleCircular];
+    [runBtn setAction:@selector(myRunAction:)];
+    [runBtn setAutoresizingMask: NSViewMaxXMargin | NSViewMinYMargin];
+    [runBtn setToolTip:@"Run button."];
+    [[window contentView] addSubview:runBtn];
+    
+    // ***** Quit btn ***** //
+    NSButton *quitBtn = [[NSButton alloc]initWithFrame:NSMakeRect( _wndW - 50, _wndH - 40, 40, 40 )];
+    [quitBtn setBezelStyle:NSBezelStyleCircular ];
+    [quitBtn setTitle: @"Q" ];
+    [quitBtn setAutoresizingMask: NSViewMinXMargin | NSViewMinYMargin];
+    [quitBtn setAction:@selector(terminate:)];
+    [quitBtn setToolTip:@"Quit button"];
+    [[window contentView] addSubview: quitBtn];
+}
+
+- (void) applicationWillFinishLaunching: (NSNotification *)notification {
+    [self buildMenu];
+    [self buildWindow];
+    [self loadSims];
+}
+
+- (void) applicationDidFinishLaunching: (NSNotification *)notification {
+}
+@end
+
+int main (void) {
+    NSApplication *application = [NSApplication sharedApplication];
+    AppDelegate *appDelegate = [[AppDelegate alloc] init];
+    [application setDelegate:appDelegate];
+    [application run];
+    return 0;
+}
+
